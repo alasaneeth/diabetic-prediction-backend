@@ -59,8 +59,8 @@ def load_model():
                 
             # Load the files
             global model, scaler
-            model = joblib.load('diabetes_model.pkl')
-            scaler = joblib.load('scaler.pkl')
+            model = joblib.load('../diabetes_model.pkl')
+            scaler = joblib.load('../scaler.pkl')
             
             print(f"✅ Model type: {type(model)}")
             print(f"✅ Scaler type: {type(scaler)}")
