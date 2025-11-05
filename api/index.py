@@ -47,8 +47,8 @@ def load_model():
             print("📦 Loading model files...")
             
             # Get file sizes
-            model_size = os.path.getsize('diabetes_model.pkl')
-            scaler_size = os.path.getsize('scaler.pkl')
+            model_size = os.path.getsize('../diabetes_model.pkl')
+            scaler_size = os.path.getsize('../scaler.pkl')
             print(f"📊 Model file size: {model_size} bytes")
             print(f"📊 Scaler file size: {scaler_size} bytes")
             
