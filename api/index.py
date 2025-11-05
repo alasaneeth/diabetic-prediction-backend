@@ -1,11 +1,16 @@
-from flask import Flask, request, jsonify
-import joblib
-import numpy as np
+from http.server import BaseHTTPRequestHandler
+import json
 import os
 import sys
 import traceback
 
-app = Flask(__name__)
+try:
+    import joblib
+    import numpy as np
+    DEPENDENCIES_LOADED = True
+except ImportError as e:
+    DEPENDENCIES_LOADED = False
+    IMPORT_ERROR = str(e)
 
 # Global variables
 model = None
@@ -14,125 +19,119 @@ scaler = None
 def load_model():
     global model, scaler
     try:
-        print("📦 Attempting to load model files...")
+        print("🔍 Checking for model files...")
+        files = os.listdir('.')
+        print(f"📁 Available files: {files}")
         
-        # List files in current directory
-        current_files = os.listdir('.')
-        print("📁 Files in directory:", current_files)
-        
-        # Check if model files exist
-        if 'diabetes_model.pkl' not in current_files:
-            print("❌ diabetes_model.pkl not found!")
-            return
-        if 'scaler.pkl' not in current_files:
-            print("❌ scaler.pkl not found!")
-            return
-            
-        print("✅ Model files found, loading...")
-        
-        # Load model and scaler
-        model = joblib.load('diabetes_model.pkl')
-        scaler = joblib.load('scaler.pkl')
-        
-        print("✅ Model and scaler loaded successfully!")
-        print(f"📊 Model type: {type(model)}")
-        print(f"📊 Scaler type: {type(scaler)}")
-        
+        if 'diabetes_model.pkl' in files and 'scaler.pkl' in files:
+            print("✅ Model files found, loading...")
+            model = joblib.load('diabetes_model.pkl')
+            scaler = joblib.load('scaler.pkl')
+            print("✅ Model loaded successfully!")
+            return True
+        else:
+            print("❌ Model files not found")
+            return False
     except Exception as e:
         print(f"❌ Error loading model: {str(e)}")
-        print(f"🔍 Full traceback: {traceback.format_exc()}")
-        model = None
-        scaler = None
+        return False
 
-# Load model on startup
-load_model()
+# Try to load model
+MODEL_LOADED = load_model() if DEPENDENCIES_LOADED else False
 
-@app.route('/')
-def home():
-    return jsonify({
-        'message': 'Diabetes Prediction API is running on Vercel!',
-        'status': 'active',
-        'model_loaded': model is not None,
-        'endpoints': ['/health', '/predict', '/debug']
-    })
-
-@app.route('/health')
-def health():
-    return jsonify({
-        'status': 'healthy',
-        'model_loaded': model is not None,
-        'scaler_loaded': scaler is not None
-    })
-
-@app.route('/debug')
-def debug():
-    """Debug endpoint to check server status"""
-    return jsonify({
-        'python_version': sys.version,
-        'current_directory': os.getcwd(),
-        'files_in_directory': os.listdir('.'),
-        'model_loaded': model is not None,
-        'model_type': str(type(model)) if model else None,
-        'scaler_loaded': scaler is not None
-    })
-
-@app.route('/predict', methods=['POST'])
-def predict():
-    """Make diabetes prediction"""
-    try:
-        print("📥 Received prediction request")
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
         
-        if model is None or scaler is None:
-            return jsonify({
-                'error': 'Model not loaded', 
-                'model_status': model is None,
-                'scaler_status': scaler is None
-            }), 503
+        if self.path == '/health':
+            response = {
+                'status': 'healthy',
+                'dependencies_loaded': DEPENDENCIES_LOADED,
+                'model_loaded': MODEL_LOADED,
+                'python_version': sys.version
+            }
+        elif self.path == '/debug':
+            response = {
+                'python_version': sys.version,
+                'current_directory': os.getcwd(),
+                'files_in_directory': os.listdir('.'),
+                'dependencies_loaded': DEPENDENCIES_LOADED,
+                'model_loaded': MODEL_LOADED,
+                'import_error': IMPORT_ERROR if not DEPENDENCIES_LOADED else None
+            }
+        else:
+            response = {
+                'message': 'Diabetes Prediction API',
+                'status': 'running',
+                'endpoints': ['/health', '/debug', '/predict'],
+                'model_ready': MODEL_LOADED
+            }
         
-        data = request.get_json()
-        print(f"📊 Request data: {data}")
+        self.wfile.write(json.dumps(response).encode())
+    
+    def do_POST(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
         
-        if not data or 'data' not in data:
-            return jsonify({'error': 'Missing data field'}), 400
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data)
             
-        input_data = data['data']
+            if self.path == '/predict':
+                if not DEPENDENCIES_LOADED:
+                    response = {
+                        'error': 'Dependencies not loaded',
+                        'details': IMPORT_ERROR
+                    }
+                elif not MODEL_LOADED:
+                    response = {
+                        'error': 'Model not loaded',
+                        'available_files': os.listdir('.')
+                    }
+                else:
+                    # Simple prediction logic
+                    input_data = data.get('data', [])
+                    
+                    if len(input_data) != 8:
+                        response = {
+                            'error': f'Expected 8 features, got {len(input_data)}'
+                        }
+                    else:
+                        try:
+                            input_array = np.array(input_data, dtype=float).reshape(1, -1)
+                            standardized_data = scaler.transform(input_array)
+                            prediction = model.predict(standardized_data)
+                            
+                            response = {
+                                'prediction': int(prediction[0]),
+                                'result': 'diabetic' if prediction[0] == 1 else 'not diabetic',
+                                'status': 'success'
+                            }
+                        except Exception as e:
+                            response = {
+                                'error': 'Prediction failed',
+                                'details': str(e)
+                            }
+            else:
+                response = {'error': 'Endpoint not found'}
+                
+        except Exception as e:
+            response = {
+                'error': 'Request processing failed',
+                'details': str(e)
+            }
         
-        if not isinstance(input_data, list):
-            return jsonify({'error': 'Data must be a list'}), 400
-            
-        if len(input_data) != 8:
-            return jsonify({
-                'error': f'Expected 8 features, got {len(input_data)}'
-            }), 400
-        
-        # Convert to numpy array
-        input_array = np.array(input_data, dtype=float).reshape(1, -1)
-        print(f"🔢 Input array: {input_array}")
-        
-        # Standardize and predict
-        standardized_data = scaler.transform(input_array)
-        prediction = model.predict(standardized_data)
-        
-        result = int(prediction[0])
-        print(f"🎯 Prediction result: {result}")
-        
-        return jsonify({
-            'prediction': result,
-            'result': 'diabetic' if result == 1 else 'not diabetic',
-            'message': 'The patient is likely diabetic' if result == 1 
-                      else 'The patient is not likely diabetic',
-            'status': 'success'
-        })
-        
-    except Exception as e:
-        print(f"💥 Prediction error: {str(e)}")
-        print(f"🔍 Full traceback: {traceback.format_exc()}")
-        return jsonify({
-            'error': 'Internal server error',
-            'details': str(e)
-        }), 500
-
-# Vercel serverless function handler
-def handler(request, context):
-    print("🔄 Vercel handler called")
-    return app(request.environ, lambda status, headers: None)
+        self.wfile.write(json.dumps(response).encode())
+    
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
