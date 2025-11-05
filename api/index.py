@@ -1,24 +1,11 @@
 from flask import Flask, request, jsonify
-import json
-import sys
+import joblib
+import numpy as np
 import os
+import sys
 import traceback
 
-print("🚀 Starting Flask application on Vercel...")
-
 app = Flask(__name__)
-
-# Try to import dependencies with error handling
-try:
-    import joblib
-    import numpy as np
-    from flask_cors import CORS
-    CORS(app)
-    print("✅ All dependencies imported successfully")
-except ImportError as e:
-    print(f"❌ Import error: {e}")
-    print("Installed packages:", os.listdir('.'))
-    # Continue without CORS for now
 
 # Global variables
 model = None
@@ -63,7 +50,7 @@ load_model()
 @app.route('/')
 def home():
     return jsonify({
-        'message': 'Diabetes Prediction API is running!',
+        'message': 'Diabetes Prediction API is running on Vercel!',
         'status': 'active',
         'model_loaded': model is not None,
         'endpoints': ['/health', '/predict', '/debug']
@@ -89,12 +76,9 @@ def debug():
         'scaler_loaded': scaler is not None
     })
 
-@app.route('/predict', methods=['POST', 'OPTIONS'])
+@app.route('/predict', methods=['POST'])
 def predict():
     """Make diabetes prediction"""
-    if request.method == 'OPTIONS':
-        return '', 200
-        
     try:
         print("📥 Received prediction request")
         
@@ -151,6 +135,4 @@ def predict():
 # Vercel serverless function handler
 def handler(request, context):
     print("🔄 Vercel handler called")
-    return app(request, context)
-
-print("✅ Flask app setup complete")
+    return app(request.environ, lambda status, headers: None)
